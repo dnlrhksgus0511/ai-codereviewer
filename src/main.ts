@@ -7,7 +7,7 @@ import minimatch from "minimatch";
 
 const GITHUB_TOKEN: string = core.getInput("GITHUB_TOKEN");
 const OPENAI_API_KEY: string = core.getInput("OPENAI_API_KEY");
-const OPENAI_API_MODEL: string = core.getInput("OPENAI_API_MODEL") || "gpt-4o";
+const OPENAI_API_MODEL: string = core.getInput("OPENAI_API_MODEL") || "gpt-4.1-2025-04-14";
 
 const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
