@@ -79,27 +79,25 @@ async function analyzeCode(
 }
 
 function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): string {
-  return `Your task is to review pull requests. Instructions:
-- Provide the response in following JSON format:  {"reviews": [{"lineNumber":  <line_number>, "reviewComment": "<review comment>"}]}
-- Do not give positive comments or compliments.
-- Provide comments and suggestions ONLY if there is something to improve, otherwise "reviews" should be an empty array.
-- Write the comment in GitHub Markdown format.
-- Use the given description only for the overall context and only comment the code.
-- IMPORTANT: NEVER suggest adding comments to the code.
-- IMPORTANT: Write all review comments in Korean language.
+  return `당신은 풀 리퀘스트를 검토하는 전문가입니다. 지침:
+- 다음 JSON 형식으로 응답해주세요: {"reviews": [{"lineNumber": <line_number>, "reviewComment": "<review comment>"}]}
+- 긍정적인 코멘트나 칭찬은 하지 마세요.
+- 개선할 사항이 있는 경우에만 코멘트와 제안을 제공하고, 그렇지 않으면 "reviews"는 빈 배열이어야 합니다.
+- 코멘트는 GitHub Markdown 형식으로 작성하세요.
+- 주어진 설명은 전체 컨텍스트로만 사용하고 코드에 대해서만 코멘트하세요.
+- 중요: 코드에 주석을 추가하라는 제안은 절대 하지 마세요.
+- 중요: 모든 리뷰 코멘트는 한국어로 작성하세요.
 
-Review the following code diff in the file "${
-    file.to
-  }" and take the pull request title and description into account when writing the response.
+파일 "${file.to}"의 다음 코드 diff를 검토하고, 응답 작성 시 풀 리퀘스트 제목과 설명을 고려하세요.
   
-Pull request title: ${prDetails.title}
-Pull request description:
+풀 리퀘스트 제목: ${prDetails.title}
+풀 리퀘스트 설명:
 
 ---
 ${prDetails.description}
 ---
 
-Git diff to review:
+검토할 Git diff:
 
 \`\`\`diff
 ${chunk.content}
@@ -125,10 +123,19 @@ async function getAIResponse(prompt: string): Promise<Array<{
   };
 
   try {
+    const jsonSupportedModels = [
+      "gpt-4-1106-preview", 
+      "gpt-4o", 
+      "gpt-4-turbo", 
+      "gpt-4.1-2025-04-14", 
+      "gpt-4-0125-preview",
+      "gpt-4-turbo-preview"
+    ];
+    
     const response = await openai.chat.completions.create({
       ...queryConfig,
       // return JSON if the model supports it:
-      ...(OPENAI_API_MODEL === "gpt-4-1106-preview" || OPENAI_API_MODEL === "gpt-4o" || OPENAI_API_MODEL === "gpt-4-turbo"
+      ...(jsonSupportedModels.includes(OPENAI_API_MODEL)
         ? { response_format: { type: "json_object" } }
         : {}),
       messages: [
@@ -140,9 +147,15 @@ async function getAIResponse(prompt: string): Promise<Array<{
     });
 
     const res = response.choices[0].message?.content?.trim() || "{}";
-    return JSON.parse(res).reviews;
+    try {
+      return JSON.parse(res).reviews;
+    } catch (error) {
+      console.error("JSON 파싱 오류:", error);
+      console.error("원본 응답:", res);
+      return null;
+    }
   } catch (error) {
-    console.error("오류:", error);
+    console.error("API 호출 오류:", error);
     return null;
   }
 }
