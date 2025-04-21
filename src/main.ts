@@ -134,10 +134,6 @@ async function getAIResponse(prompt: string): Promise<Array<{
       messages: [
         {
           role: "system",
-          content: "당신은 코드 리뷰 도우미입니다. 모든 응답은 한국어로 작성해야 합니다.",
-        },
-        {
-          role: "user",
           content: prompt,
         },
       ],
