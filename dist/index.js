@@ -50,7 +50,7 @@ const parse_diff_1 = __importDefault(__nccwpck_require__(4833));
 const minimatch_1 = __importDefault(__nccwpck_require__(2002));
 const GITHUB_TOKEN = core.getInput("GITHUB_TOKEN");
 const OPENAI_API_KEY = core.getInput("OPENAI_API_KEY");
-const OPENAI_API_MODEL = core.getInput("OPENAI_API_MODEL");
+const OPENAI_API_MODEL = core.getInput("OPENAI_API_MODEL") || "gpt-4o";
 const octokit = new rest_1.Octokit({ auth: GITHUB_TOKEN });
 const openai = new openai_1.default({
     apiKey: OPENAI_API_KEY,
@@ -113,6 +113,7 @@ function createPrompt(file, chunk, prDetails) {
 - Write the comment in GitHub Markdown format.
 - Use the given description only for the overall context and only comment the code.
 - IMPORTANT: NEVER suggest adding comments to the code.
+- IMPORTANT: Write all review comments in Korean language.
 
 Review the following code diff in the file "${file.to}" and take the pull request title and description into account when writing the response.
   
@@ -146,11 +147,15 @@ function getAIResponse(prompt) {
             presence_penalty: 0,
         };
         try {
-            const response = yield openai.chat.completions.create(Object.assign(Object.assign(Object.assign({}, queryConfig), (OPENAI_API_MODEL === "gpt-4-1106-preview"
+            const response = yield openai.chat.completions.create(Object.assign(Object.assign(Object.assign({}, queryConfig), (OPENAI_API_MODEL === "gpt-4-1106-preview" || OPENAI_API_MODEL === "gpt-4o" || OPENAI_API_MODEL === "gpt-4-turbo"
                 ? { response_format: { type: "json_object" } }
                 : {})), { messages: [
                     {
                         role: "system",
+                        content: "당신은 코드 리뷰 도우미입니다. 모든 응답은 한국어로 작성해야 합니다.",
+                    },
+                    {
+                        role: "user",
                         content: prompt,
                     },
                 ] }));
@@ -158,7 +163,7 @@ function getAIResponse(prompt) {
             return JSON.parse(res).reviews;
         }
         catch (error) {
-            console.error("Error:", error);
+            console.error("오류:", error);
             return null;
         }
     });
@@ -210,11 +215,11 @@ function main() {
             diff = String(response.data);
         }
         else {
-            console.log("Unsupported event:", process.env.GITHUB_EVENT_NAME);
+            console.log("지원되지 않는 이벤트:", process.env.GITHUB_EVENT_NAME);
             return;
         }
         if (!diff) {
-            console.log("No diff found");
+            console.log("변경 사항을 찾을 수 없습니다");
             return;
         }
         const parsedDiff = (0, parse_diff_1.default)(diff);
@@ -232,7 +237,7 @@ function main() {
     });
 }
 main().catch((error) => {
-    console.error("Error:", error);
+    console.error("오류:", error);
     process.exit(1);
 });
 
