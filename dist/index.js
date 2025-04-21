@@ -106,6 +106,27 @@ function analyzeCode(parsedDiff, prDetails) {
     });
 }
 function createPrompt(file, chunk, prDetails) {
+    // 변경된 라인 번호만 추출
+    const validLineNumbers = chunk.changes
+        .filter(change => {
+        if (change.type === 'add' && change.ln !== undefined) {
+            return true;
+        }
+        if (change.type === 'normal' && change.ln2 !== undefined) {
+            return true;
+        }
+        return false;
+    })
+        .map(change => {
+        if (change.type === 'add') {
+            return change.ln;
+        }
+        if (change.type === 'normal' && change.ln2 !== undefined) {
+            return change.ln2;
+        }
+        return undefined;
+    })
+        .filter((ln) => ln !== undefined);
     return `당신은 풀 리퀘스트를 검토하는 전문가입니다. 지침:
 - 다음 JSON 형식으로 응답해주세요: {"reviews": [{"lineNumber": <line_number>, "reviewComment": "<review comment>"}]}
 - 긍정적인 코멘트나 칭찬은 하지 마세요.
@@ -114,6 +135,8 @@ function createPrompt(file, chunk, prDetails) {
 - 주어진 설명은 전체 컨텍스트로만 사용하고 코드에 대해서만 코멘트하세요.
 - 중요: 코드에 주석을 추가하라는 제안은 절대 하지 마세요.
 - 중요: 모든 리뷰 코멘트는 한국어로 작성하세요.
+- 매우 중요: 반드시 아래 나열된 라인 번호 중 하나에만 코멘트를 작성하세요. 그렇지 않으면 오류가 발생합니다.
+- 유효한 라인 번호: ${validLineNumbers.join(', ')}
 
 파일 "${file.to}"의 다음 코드 diff를 검토하고, 응답 작성 시 풀 리퀘스트 제목과 설명을 고려하세요.
   
@@ -180,26 +203,64 @@ function getAIResponse(prompt) {
     });
 }
 function createComment(file, chunk, aiResponses) {
-    return aiResponses.flatMap((aiResponse) => {
-        if (!file.to) {
-            return [];
+    if (!file.to) {
+        return [];
+    }
+    // diff에 포함된 라인 번호 추출
+    const validLineNumbers = new Set();
+    for (const change of chunk.changes) {
+        if (change.type === 'add' && change.ln !== undefined) {
+            validLineNumbers.add(change.ln);
         }
-        return {
-            body: aiResponse.reviewComment,
-            path: file.to,
-            line: Number(aiResponse.lineNumber),
-        };
-    });
+        else if (change.type === 'normal' && change.ln2 !== undefined) {
+            validLineNumbers.add(change.ln2);
+        }
+    }
+    // 유효한 라인 번호에 대한 코멘트만 생성
+    return aiResponses
+        .filter(aiResponse => {
+        const lineNumber = Number(aiResponse.lineNumber);
+        const isValid = validLineNumbers.has(lineNumber);
+        if (!isValid) {
+            console.log(`경고: 라인 ${lineNumber}은(는) diff에 포함되지 않아 코멘트를 생성하지 않습니다.`);
+        }
+        return isValid;
+    })
+        .map(aiResponse => ({
+        body: aiResponse.reviewComment,
+        path: file.to,
+        line: Number(aiResponse.lineNumber),
+    }));
 }
 function createReviewComment(owner, repo, pull_number, comments) {
+    var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
-        yield octokit.pulls.createReview({
-            owner,
-            repo,
-            pull_number,
-            comments,
-            event: "COMMENT",
-        });
+        try {
+            if (comments.length === 0) {
+                console.log("코멘트가 없어 리뷰를 생성하지 않습니다.");
+                return;
+            }
+            console.log(`총 ${comments.length}개의 코멘트로 리뷰 생성 중...`);
+            for (const comment of comments) {
+                console.log(`- 파일: ${comment.path}, 라인: ${comment.line}`);
+            }
+            yield octokit.pulls.createReview({
+                owner,
+                repo,
+                pull_number,
+                comments,
+                event: "COMMENT",
+            });
+            console.log("리뷰가 성공적으로 생성되었습니다.");
+        }
+        catch (error) {
+            console.error("리뷰 생성 오류:", error);
+            // 세부 오류 정보 출력
+            if ((_b = (_a = error.response) === null || _a === void 0 ? void 0 : _a.data) === null || _b === void 0 ? void 0 : _b.errors) {
+                console.error("세부 오류:", JSON.stringify(error.response.data.errors, null, 2));
+            }
+            throw error;
+        }
     });
 }
 function main() {
