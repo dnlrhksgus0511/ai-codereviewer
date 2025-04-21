@@ -86,18 +86,42 @@ function getDiff(owner, repo, pull_number) {
     });
 }
 function analyzeCode(parsedDiff, prDetails) {
-    var _a;
     return __awaiter(this, void 0, void 0, function* () {
         const comments = [];
         // Generate PR summary first
         const prSummary = yield generatePRSummary(parsedDiff, prDetails);
-        // Add summary as a general comment (not tied to a specific line)
-        if (prSummary) {
-            comments.push({
-                body: prSummary,
-                path: ((_a = parsedDiff[0]) === null || _a === void 0 ? void 0 : _a.to) || "",
-                line: 1,
-            });
+        // Find a suitable line for the summary comment
+        if (prSummary && parsedDiff.length > 0) {
+            // Find the first valid line in the diff to attach the summary to
+            let summaryTarget = null;
+            // Look for an added line in the first file
+            for (const file of parsedDiff) {
+                if (file.to) {
+                    for (const chunk of file.chunks) {
+                        for (const change of chunk.changes) {
+                            if (change.type === 'add' && change.ln !== undefined) {
+                                summaryTarget = {
+                                    path: file.to,
+                                    line: change.ln
+                                };
+                                break;
+                            }
+                        }
+                        if (summaryTarget)
+                            break;
+                    }
+                }
+                if (summaryTarget)
+                    break;
+            }
+            // Only add the summary if we found a valid line to attach it to
+            if (summaryTarget) {
+                comments.push({
+                    body: prSummary,
+                    path: summaryTarget.path,
+                    line: summaryTarget.line,
+                });
+            }
         }
         for (const file of parsedDiff) {
             if (file.to === "/dev/null")
@@ -259,12 +283,32 @@ function createComment(file, chunk, aiResponses) {
         if (!file.to) {
             return [];
         }
+        // Convert lineNumber to a number
+        const lineNum = Number(aiResponse.lineNumber);
+        // Verify that this line number exists in the diff chunk
+        const lineExists = chunk.changes.some(change => {
+            if (change.type === 'add') {
+                // For added lines, check ln property
+                return change.ln === lineNum;
+            }
+            else if (change.type === 'normal') {
+                // For normal (context) lines, check ln2 property (which is the new file line number)
+                return change.ln2 === lineNum;
+            }
+            // Ignore deleted lines for comments
+            return false;
+        });
+        // Skip this comment if the line isn't part of the diff
+        if (!lineExists) {
+            console.log(`Skipping comment for line ${lineNum} in ${file.to} as it's not part of the diff`);
+            return [];
+        }
         const severityLabel = getSeverityLabel(aiResponse.severity);
         const body = `**심각도: ${aiResponse.severity}/5** - ${severityLabel}\n\n${aiResponse.reviewComment}`;
         return {
             body,
             path: file.to,
-            line: Number(aiResponse.lineNumber),
+            line: lineNum,
         };
     });
 }
