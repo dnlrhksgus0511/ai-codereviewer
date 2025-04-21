@@ -86,8 +86,19 @@ function getDiff(owner, repo, pull_number) {
     });
 }
 function analyzeCode(parsedDiff, prDetails) {
+    var _a;
     return __awaiter(this, void 0, void 0, function* () {
         const comments = [];
+        // Generate PR summary first
+        const prSummary = yield generatePRSummary(parsedDiff, prDetails);
+        // Add summary as a general comment (not tied to a specific line)
+        if (prSummary) {
+            comments.push({
+                body: prSummary,
+                path: ((_a = parsedDiff[0]) === null || _a === void 0 ? void 0 : _a.to) || "",
+                line: 1,
+            });
+        }
         for (const file of parsedDiff) {
             if (file.to === "/dev/null")
                 continue; // Ignore deleted files
@@ -103,6 +114,79 @@ function analyzeCode(parsedDiff, prDetails) {
             }
         }
         return comments;
+    });
+}
+function generatePRSummary(parsedDiff, prDetails) {
+    var _a, _b, _c;
+    return __awaiter(this, void 0, void 0, function* () {
+        // Create a more detailed summary of the code changes
+        const detailedChanges = parsedDiff.map(file => {
+            const path = file.to || file.from || '';
+            const changeType = file.to ? (file.from ? '수정됨' : '추가됨') : '삭제됨';
+            const changesCount = file.chunks.reduce((sum, chunk) => sum + chunk.changes.length, 0);
+            // Extract the actual code changes for better context
+            // Limit to a reasonable number of changes to avoid token limits
+            const codeChanges = file.chunks.flatMap(chunk => chunk.changes
+                .filter(change => change.type === 'add' || change.type === 'del')
+                .slice(0, 10) // Limit to 10 changes per file
+                .map(change => `${change.type === 'add' ? '+' : '-'} ${change.content.trim()}`)).join('\n');
+            return `파일: ${path} (${changeType}, ${changesCount}개 라인 변경)
+주요 코드 변경:
+\`\`\`
+${codeChanges}
+${file.chunks.length > 0 && file.chunks[0].changes.length > 10 ? '... (더 많은 변경사항 있음)' : ''}
+\`\`\``;
+        }).join('\n\n');
+        const prompt = `당신은 코드 변경사항을 분석하고 요약하는 전문가입니다. 아래 PR(Pull Request)의 코드 변경을 분석하여 다음을 포함한 요약을 한국어로 작성해주세요:
+
+1. 어떤 기능이 추가되었는지
+2. 어떤 부분이 수정되었는지
+3. 아키텍처나 성능에 영향을 미치는 중요한 변경사항
+4. 코드만 보고 유추할 수 있는 PR의 목적
+
+코드 변경을 보고 최대한 정확하게 유추해주세요. PR 제목과 설명은 참고용으로만 사용하고, 실제 코드 변경을 중심으로 분석해주세요.
+
+Pull request 제목: ${prDetails.title}
+Pull request 설명:
+
+---
+${prDetails.description}
+---
+
+상세 코드 변경사항:
+${detailedChanges}
+
+응답 형식:
+{
+  "summary": "PR에 대한 기술적 요약 (한국어)",
+  "changes": ["주요 변경사항 1", "주요 변경사항 2", "..."]
+}`;
+        try {
+            const response = yield openai.chat.completions.create(Object.assign(Object.assign({ model: OPENAI_API_MODEL, temperature: 0.3, max_tokens: 700 }, (OPENAI_API_MODEL === "gpt-4-1106-preview" || OPENAI_API_MODEL === "gpt-4o" || OPENAI_API_MODEL === "gpt-4-turbo"
+                ? { response_format: { type: "json_object" } }
+                : {})), { messages: [
+                    {
+                        role: "system",
+                        content: prompt,
+                    },
+                ] }));
+            const res = ((_b = (_a = response.choices[0].message) === null || _a === void 0 ? void 0 : _a.content) === null || _b === void 0 ? void 0 : _b.trim()) || "{}";
+            const summaryData = JSON.parse(res);
+            // Format the changes as bullet points
+            const changesList = ((_c = summaryData.changes) === null || _c === void 0 ? void 0 : _c.length)
+                ? "\n\n### 주요 변경사항\n" + summaryData.changes.map((change) => `- ${change}`).join("\n")
+                : "";
+            return `## 🔍 PR 요약
+    
+${summaryData.summary}${changesList}
+
+---
+`;
+        }
+        catch (error) {
+            console.error("PR 요약 생성 오류:", error);
+            return ""; // Return empty string on error
+        }
     });
 }
 function createPrompt(file, chunk, prDetails) {

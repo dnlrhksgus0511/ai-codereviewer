@@ -61,6 +61,18 @@ async function analyzeCode(
   prDetails: PRDetails
 ): Promise<Array<{ body: string; path: string; line: number }>> {
   const comments: Array<{ body: string; path: string; line: number }> = [];
+  
+  // Generate PR summary first
+  const prSummary = await generatePRSummary(parsedDiff, prDetails);
+  
+  // Add summary as a general comment (not tied to a specific line)
+  if (prSummary) {
+    comments.push({
+      body: prSummary,
+      path: parsedDiff[0]?.to || "",
+      line: 1,
+    });
+  }
 
   for (const file of parsedDiff) {
     if (file.to === "/dev/null") continue; // Ignore deleted files
@@ -76,6 +88,94 @@ async function analyzeCode(
     }
   }
   return comments;
+}
+
+async function generatePRSummary(
+  parsedDiff: File[],
+  prDetails: PRDetails
+): Promise<string> {
+  // Create a more detailed summary of the code changes
+  const detailedChanges = parsedDiff.map(file => {
+    const path = file.to || file.from || '';
+    const changeType = file.to ? (file.from ? '수정됨' : '추가됨') : '삭제됨';
+    const changesCount = file.chunks.reduce((sum, chunk) => sum + chunk.changes.length, 0);
+    
+    // Extract the actual code changes for better context
+    // Limit to a reasonable number of changes to avoid token limits
+    const codeChanges = file.chunks.flatMap(chunk => 
+      chunk.changes
+        .filter(change => change.type === 'add' || change.type === 'del')
+        .slice(0, 10) // Limit to 10 changes per file
+        .map(change => `${change.type === 'add' ? '+' : '-'} ${change.content.trim()}`)
+    ).join('\n');
+    
+    return `파일: ${path} (${changeType}, ${changesCount}개 라인 변경)
+주요 코드 변경:
+\`\`\`
+${codeChanges}
+${file.chunks.length > 0 && file.chunks[0].changes.length > 10 ? '... (더 많은 변경사항 있음)' : ''}
+\`\`\``;
+  }).join('\n\n');
+
+  const prompt = `당신은 코드 변경사항을 분석하고 요약하는 전문가입니다. 아래 PR(Pull Request)의 코드 변경을 분석하여 다음을 포함한 요약을 한국어로 작성해주세요:
+
+1. 어떤 기능이 추가되었는지
+2. 어떤 부분이 수정되었는지
+3. 아키텍처나 성능에 영향을 미치는 중요한 변경사항
+4. 코드만 보고 유추할 수 있는 PR의 목적
+
+코드 변경을 보고 최대한 정확하게 유추해주세요. PR 제목과 설명은 참고용으로만 사용하고, 실제 코드 변경을 중심으로 분석해주세요.
+
+Pull request 제목: ${prDetails.title}
+Pull request 설명:
+
+---
+${prDetails.description}
+---
+
+상세 코드 변경사항:
+${detailedChanges}
+
+응답 형식:
+{
+  "summary": "PR에 대한 기술적 요약 (한국어)",
+  "changes": ["주요 변경사항 1", "주요 변경사항 2", "..."]
+}`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: OPENAI_API_MODEL,
+      temperature: 0.3,
+      max_tokens: 700,
+      ...(OPENAI_API_MODEL === "gpt-4-1106-preview" || OPENAI_API_MODEL === "gpt-4o" || OPENAI_API_MODEL === "gpt-4-turbo"
+        ? { response_format: { type: "json_object" } }
+        : {}),
+      messages: [
+        {
+          role: "system",
+          content: prompt,
+        },
+      ],
+    });
+
+    const res = response.choices[0].message?.content?.trim() || "{}";
+    const summaryData = JSON.parse(res);
+    
+    // Format the changes as bullet points
+    const changesList = summaryData.changes?.length 
+      ? "\n\n### 주요 변경사항\n" + summaryData.changes.map((change: string) => `- ${change}`).join("\n")
+      : "";
+    
+    return `## 🔍 PR 요약
+    
+${summaryData.summary}${changesList}
+
+---
+`;
+  } catch (error) {
+    console.error("PR 요약 생성 오류:", error);
+    return ""; // Return empty string on error
+  }
 }
 
 function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): string {
