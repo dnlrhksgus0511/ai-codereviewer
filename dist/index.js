@@ -107,13 +107,7 @@ function analyzeCode(parsedDiff, prDetails) {
 }
 function createPrompt(file, chunk, prDetails) {
     return `Your task is to review pull requests. Instructions:
-- Provide the response in following JSON format:  {"reviews": [{"lineNumber":  <line_number>, "reviewComment": "<review comment>", "severity": <severity_score>}]}
-- Severity score should be an integer from 1 to 5, where:
-  1 = Minor suggestion (stylistic, can be ignored)
-  2 = Low importance (should fix eventually)
-  3 = Medium importance (should fix soon)
-  4 = High importance (fix required before merge)
-  5 = Critical (security issue, bug, or serious problem)
+- Provide the response in following JSON format:  {"reviews": [{"lineNumber":  <line_number>, "reviewComment": "<review comment>"}]}
 - Do not give positive comments or compliments.
 - Provide comments and suggestions ONLY if there is something to improve, otherwise "reviews" should be an empty array.
 - Write the comment in GitHub Markdown format.
@@ -175,24 +169,12 @@ function createComment(file, chunk, aiResponses) {
         if (!file.to) {
             return [];
         }
-        const severityLabel = getSeverityLabel(aiResponse.severity);
-        const body = `**심각도: ${severityLabel} (${aiResponse.severity}/5)**\n\n${aiResponse.reviewComment}`;
         return {
-            body,
+            body: aiResponse.reviewComment,
             path: file.to,
             line: Number(aiResponse.lineNumber),
         };
     });
-}
-function getSeverityLabel(severity) {
-    switch (severity) {
-        case 1: return "낮음";
-        case 2: return "보통";
-        case 3: return "중요";
-        case 4: return "높음";
-        case 5: return "심각";
-        default: return "보통";
-    }
 }
 function createReviewComment(owner, repo, pull_number, comments) {
     return __awaiter(this, void 0, void 0, function* () {
