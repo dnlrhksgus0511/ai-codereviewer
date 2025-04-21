@@ -86,6 +86,7 @@ function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): string {
 - Write the comment in GitHub Markdown format.
 - Use the given description only for the overall context and only comment the code.
 - IMPORTANT: NEVER suggest adding comments to the code.
+- IMPORTANT: Write all review comments in Korean language.
 
 Review the following code diff in the file "${
     file.to
@@ -133,6 +134,10 @@ async function getAIResponse(prompt: string): Promise<Array<{
       messages: [
         {
           role: "system",
+          content: "당신은 코드 리뷰 도우미입니다. 모든 응답은 한국어로 작성해야 합니다.",
+        },
+        {
+          role: "user",
           content: prompt,
         },
       ],
@@ -141,7 +146,7 @@ async function getAIResponse(prompt: string): Promise<Array<{
     const res = response.choices[0].message?.content?.trim() || "{}";
     return JSON.parse(res).reviews;
   } catch (error) {
-    console.error("Error:", error);
+    console.error("오류:", error);
     return null;
   }
 }
@@ -210,12 +215,12 @@ async function main() {
 
     diff = String(response.data);
   } else {
-    console.log("Unsupported event:", process.env.GITHUB_EVENT_NAME);
+    console.log("지원되지 않는 이벤트:", process.env.GITHUB_EVENT_NAME);
     return;
   }
 
   if (!diff) {
-    console.log("No diff found");
+    console.log("변경 사항을 찾을 수 없습니다");
     return;
   }
 
@@ -244,6 +249,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error("Error:", error);
+  console.error("오류:", error);
   process.exit(1);
 });
