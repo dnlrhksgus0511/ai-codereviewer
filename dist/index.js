@@ -107,13 +107,19 @@ function analyzeCode(parsedDiff, prDetails) {
 }
 function createPrompt(file, chunk, prDetails) {
     return `Your task is to review pull requests. Instructions:
-- Provide the response in following JSON format:  {"reviews": [{"lineNumber":  <line_number>, "reviewComment": "<review comment>"}]}
+- Provide the response in following JSON format:  {"reviews": [{"lineNumber":  <line_number>, "reviewComment": "<review comment>", "severity": <severity_score>}]}
 - Do not give positive comments or compliments.
 - Provide comments and suggestions ONLY if there is something to improve, otherwise "reviews" should be an empty array.
 - Write the comment in GitHub Markdown format.
 - Use the given description only for the overall context and only comment the code.
 - IMPORTANT: NEVER suggest adding comments to the code.
 - IMPORTANT: Write all review comments in Korean language.
+- IMPORTANT: Include a severity score (1-5) for each issue where:
+  - 1: Minor style suggestion that can be ignored
+  - 2: Minor issue that should be fixed but not critical
+  - 3: Moderate issue that should be addressed
+  - 4: Significant issue that could lead to bugs or maintenance problems
+  - 5: Critical issue that must be fixed (security vulnerability, performance issue, etc.)
 
 Review the following code diff in the file "${file.to}" and take the pull request title and description into account when writing the response.
   
@@ -169,12 +175,30 @@ function createComment(file, chunk, aiResponses) {
         if (!file.to) {
             return [];
         }
+        const severityLabel = getSeverityLabel(aiResponse.severity);
+        const body = `**심각도: ${aiResponse.severity}/5** - ${severityLabel}\n\n${aiResponse.reviewComment}`;
         return {
-            body: aiResponse.reviewComment,
+            body,
             path: file.to,
             line: Number(aiResponse.lineNumber),
         };
     });
+}
+function getSeverityLabel(severity) {
+    switch (severity) {
+        case 1:
+            return "🟢 무시 가능한 minor 이슈";
+        case 2:
+            return "🟡 중요도 낮음";
+        case 3:
+            return "🟠 중요도 중간";
+        case 4:
+            return "🔴 중요 이슈";
+        case 5:
+            return "⛔ 심각한 문제 - 반드시 수정 필요";
+        default:
+            return "";
+    }
 }
 function createReviewComment(owner, repo, pull_number, comments) {
     return __awaiter(this, void 0, void 0, function* () {
